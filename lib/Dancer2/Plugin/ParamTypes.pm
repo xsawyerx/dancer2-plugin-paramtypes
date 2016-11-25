@@ -3,57 +3,23 @@ package Dancer2::Plugin::ParamTypes;
 
 use strict;
 use warnings;
-use constant { 'INTERNAL_SERVER_ERROR' => 500 };
+
 use DDP;
 use Carp ();
 use Dancer2::Plugin;
 use Scalar::Util ();
-
-# TODO: Types::Tiny ?
-# PLZ OH PLZ FIX Types::Tiny::XS !!!
 
 ## no critic qw(Subroutines::ProhibitCallsToUndeclaredSubs)
 plugin_keywords(qw<register_type_check register_type_response with_types>);
 
 has 'type_checks' => (
     'is'      => 'ro',
-    'default' => sub {
-        (
-            {
-                'int' => sub { Scalar::Util::looks_like_number( $_[0] ) },
-
-                'positive_int' => sub {
-                    Scalar::Util::looks_like_number( $_[0] ) && $_[0] >= 0;
-                },
-
-                'negative_int' => sub {
-                    Scalar::Util::looks_like_number( $_[0] ) && $_[0] < 0;
-                },
-            }
-        );
-    },
+    'default' => sub { +{} },
 );
 
 has 'type_responses' => (
     'is'      => 'ro',
-    'default' => sub {
-        (
-            {
-                'warn' => sub {
-                    my ( $app, $type_details ) = @_;
-                    printf STDERR '%s failed test "%s"',
-                        @{$type_details}{qw<name type>};
-                },
-
-                'error' => sub {
-                    my ( $app, $type_details ) = @_;
-                    my $name = $type_details->{'name'};
-                    $app->response->status( INTERNAL_SERVER_ERROR() );
-                    $app->response->content("Type check failed for $name");
-                },
-            }
-        );
-    },
+    'default' => sub { +{} },
 );
 
 sub register_type_check {
@@ -72,12 +38,17 @@ sub with_types {
     my ( $self, $full_type_details, $cb ) = @_;
     my %params_to_check;
 
-    foreach my $type_details ( @{$full_type_details} ) {
-        my $name     = $type_details->{'name'};
-        my $type     = $type_details->{'type'};
-        my $response = $type_details->{'on_invalid'};
-        my $source   = $type_details->{'source'}
-            or Carp::croak("Type '$name' must provide a source");
+    for ( my $idx = 0; $idx <= $#{$full_type_details}; $idx++ ) {
+        my $item = $full_type_details->[$idx];
+        my ( $is_optional, $type_details )
+            = ref $item eq 'ARRAY' ? ( 0, $item )
+            : $item eq 'optional'  ? ( 1, $full_type_details->[ ++$idx ] )
+            : Carp::croak("Unsupported type option: $item");
+
+        @{$type_details} == 4
+            or Carp::croak('Please provide 4 elements for each type');
+
+        my ( $source, $name, $type, $response ) = @{$type_details};
 
         $source eq 'route' || $source eq 'query' || $source eq 'body'
             or
@@ -90,10 +61,12 @@ sub with_types {
             or
             Carp::croak("Type $name provided unknown response '$response'");
 
-        $params_to_check{$source}{$name} = $type_details;
+        $params_to_check{$source}{$name} = [ $is_optional, $type_details ];
     }
 
+    # Couldn't prove yet that this is required, but it makes sense to me
     Scalar::Util::weaken( my $plugin = $self );
+    #my $plugin = $self;
 
     return sub {
         my @route_args = @_;
@@ -112,10 +85,10 @@ sub with_types {
                 foreach my $param_name (
                     keys %{ $params_to_check{$param_source} } )
                 {
-                    my $type_details
-                        = $params_to_check{$param_source}{$param_name};
+                    my ( $is_optional, $type_details )
+                        = @{ $params_to_check{$param_source}{$param_name} };
 
-                    $plugin->run_check($type_details);
+                    $plugin->run_check( $is_optional, $type_details );
                 }
             }
 
@@ -126,36 +99,43 @@ sub with_types {
 }
 
 sub run_check {
-    my ( $self, $type_details ) = @_;
+    my ( $self, $is_optional, $type_details ) = @_;
 
-    my $param_name   = $type_details->{'name'};
-    my $param_source = $type_details->{'source'};
-    my $app          = $self->app;
-    my $request      = $app->request;
+    my ( $source, $name, $type, $action ) = @{$type_details};
 
-    # This used to be a "? :" expression, but it makes it harder to
-    # notice when a value wasn't supplied vs. empty string. In this
-    # situation, we know it's undef if no value was provided. -- SX.
-    my $param_value;
-    if ( $param_source eq 'route' ) {
-        $param_value = $request->route_parameters->get($param_name);
-    } elsif ( $param_source eq 'query' ) {
-        $param_value = $request->query_parameters->get($param_name);
-    } elsif ( $param_source eq 'body' ) {
-        $param_value =  $request->body_parameters->get($param_name);
+    my $app     = $self->app;
+    my $request = $app->request;
+
+    my $params
+        = $source eq 'route' ? $request->route_parameters
+        : $source eq 'query' ? $request->query_parameters
+        :                      $request->body_parameters;
+
+    # No parameter value, is this okay or not?
+    if ( !exists $params->{$name} ) {
+        # It's okay, ignore
+        $is_optional
+            and return 1;
+
+        # Not okay, missing when it's required!
+        $self->dsl->send_error(
+            "Missing $source parameter $name ($type)",
+            500,
+        );
+
+        return $self->type_responses->{'error'}->( $app, $type_details );
     }
 
-    # There is no value added to check for this
-    defined $param_value
-        or return 1;
+    my @param_values = $params->get_all($name);
+    my $check_cb     = $self->type_checks->{$type};
 
-    # There is no check for this
-    my $check_cb = $self->type_checks->{ $type_details->{'type'} };
+    foreach my $param_value (@param_values) {
+        if ( ! $check_cb->($param_value) ) {
+            my $response_cb
+                = $self->type_responses->{$action};
 
-    if ( ! $check_cb->($param_value) ) {
-        my $response_cb
-            = $self->type_responses->{ $type_details->{'on_invalid'} };
-        return $response_cb->( $app, $type_details );
+            return $response_cb->( $app, $type_details );
+        }
     }
 
     return;
@@ -167,53 +147,81 @@ __END__
 
 =head1 SYNOPSIS
 
-    package MyApp {
-        use Dancer2;
-        use Dancer2::Plugin::ParamTypes;
+    package MyApp;
+    use Dancer2;
+    use Dancer2::Plugin::ParamTypes;
 
-        get '/' => with_types[(
-            {
-                'name'       => 'id',
-                'source'     => 'query',
-                'type'       => 'positive_int',
-                'on_invalid' => 'error',
-            },
-        )} => sub {
-            my $id = query_parameters->get('id');
+    # First we define some type checks and type responses
+    # Read below for these two methods, they are required
+    register_type_check(...);
+    register_type_response(...);
 
-            # $id is a positive int, for sure
-        };
-    }
+    # Now we can provide types
+    get '/:num' => with_types [
+        [ 'query', 'id',  'positive_int', 'error' ],
+        [ 'route', 'num', 'positive_int', 'error' ],
+
+        'optional' => [ 'query', 'name', 'int', 'error' ],
+    ] => sub {
+        my $id = query_parameters->{'id'};
+        ...
+    };
 
 =head1 DESCRIPTION
 
-This is a basic module that allows you to provide a stanza of
-parameter type checks for your routes.
+This is a basic module that allows you to provide a stanza of parameter
+type checks for your routes.
 
 It supports all three possible sources (C<route>, C<query>, and
-C<body>) and allows you to both add your own checks and your own
-actions when a check fails.
+C<body>).
 
-=head1 TO DO
+Currently it does not have any known types and actions on its own. You
+you will need to write your own code to add them. The synopsis includes
+an example on adding your own.
 
-=over 4
+=head2 Methods
 
-=item * Add more types
+=head3 C<register_type_check>
 
-Trivial examples are available as C<int>, C<positive_int>, and
-C<negative_int>. A lot of other common types should be added.
+First you must register a type check, allowing you to test stuff:
 
-=item * Support type systems
+    register_type_check 'Int' => sub {
+        return Scalar::Util::looks_like_number( $_[0] );
+    };
 
-There are several type systems available. There's not a lot of use
-writing another one unless special ones are added. Some type systems
-already allow you to add advanced options like in-lined version of
-your types.
+=head3 C<register_type_response>
 
-L<Type::Tiny> comes to mind.
+    register_type_response 'error' => sub {
+        my ( $app, $type_details ) = @_;
+        my ( $source, $name, $type, $action ) = @{$type_details};
 
-=item * Document the rest of the options
+        send_error("Type check failed for $source $name ($type)");
+    }
 
-Duh.
+=head3 C<with_types>
 
-=back
+C<with_types> defines checks for parameters for a route request.
+
+    get '/:name' => with_request [
+        [ 'route', 'name', 'Str', 'error' ]
+    ] => sub {
+        ...
+    };
+
+=head2 Connecting existing type systems
+
+Because each type check is a callback, you can connect these to other
+type systems:
+
+    register_type_check 'Str' => sub {
+        require MooX::Types::MooseLike::Base;
+
+        # This call will die when failing,
+        # so we put it in an eval
+        eval {
+            MooX::Types::MooseLike::Base::Str->( $_[0] );
+            1;
+        } or return;
+
+        return 1;
+    };
