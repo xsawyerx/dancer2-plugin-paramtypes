@@ -29,7 +29,7 @@ use HTTP::Request::Common;
 
 my $test = Plack::Test->create( MyApp->to_app );
 
-subtest 'Correctly handled proper arguments' => sub {
+subtest 'Correctly handled proper parameters' => sub {
     successful_test( $test, GET('/route/30'),    'route' );
     successful_test( $test, GET('/query?id=30'), 'query' );
     successful_test( $test, GET('/query?id=30&id=4'), 'query' );
@@ -37,12 +37,12 @@ subtest 'Correctly handled proper arguments' => sub {
     successful_test( $test, POST( '/body', 'Content' => 'id=30&id=77' ), 'body' );
 };
 
-subtest 'Failing missing arguments' => sub {
+subtest 'Failing missing parameters' => sub {
     missing_test( $test, GET('/query'), 'query', 'id' );
     missing_test( $test, POST('/body'), 'body', 'id' );
 };
 
-subtest 'Failing incorrect arguments' => sub {
+subtest 'Failing incorrect parameters' => sub {
     failing_test( $test, GET('/route/k'), 'route', 'id', 'Int', );
     failing_test( $test, GET('/query?id=k'), 'query', 'id', 'Int', );
     failing_test( $test, POST( '/body', 'Content' => 'id=k' ), 'body', 'id', 'Int' );
