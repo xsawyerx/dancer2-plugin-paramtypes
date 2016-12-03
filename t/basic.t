@@ -1,11 +1,9 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Test::More 'tests' => 5;
+use Test::More 'tests' => 3;
 use Plack::Test;
 use HTTP::Request::Common;
-
-## no critic qw(Subroutines::ProhibitCallsToUndeclaredSubs)
 
 {
     package MyApp;
@@ -13,99 +11,67 @@ use HTTP::Request::Common;
     use Dancer2::Plugin::ParamTypes;
 
     register_type_check(
-        'positive_int' => sub {
-            return Scalar::Util::looks_like_number( $_[0] ) && $_[0] >= 0;
-        }
-    );
+        'Int' => sub { Scalar::Util::looks_like_number( $_[0] ) } );
 
-    register_type_check(
-        'int' => sub { Scalar::Util::looks_like_number( $_[0] ) } );
+    get '/route/:id' => with_types [
+        [ 'route', 'id',  'Int' ],
+    ] => sub { return 'route'; };
 
-    register_type_action(
-        'warn' => sub {
-            my ( $app, $type_details ) = @_;
-            printf STDERR 'Failed test for "%s" with "%s"',
-                @{$type_details}[ 1, 2 ];
-        }
-    );
+    get '/query' => with_types [
+        [ 'query', 'id', 'Int' ],
+    ] => sub { return 'query'; };
 
-    register_type_action(
-        'error' => sub {
-            my $type_details = shift;
-            my $name = $type_details->{'name'};
-            send_error( "Type check failed for: $name", 500 );
-        }
-    );
-
-    get '/:num' => with_types [
-        [ 'query', 'id',  'positive_int', 'error' ],
-        [ 'route', 'num', 'positive_int', 'error' ],
-
-        'optional' => [ 'query', 'name', 'int', 'error' ],
-    ] => sub {
-        return 'hello';
-    };
-
-    post '/upload' => with_types [
-        [ ['query', 'body'], 'id',  'positive_int', 'error' ],
-    ] => sub {
-        if ( request->method eq 'GET' ) {
-            return query_parameters->{'id'};
-        } else {
-            return body_parameters->{'id'};
-        }
-    };
+    post '/body' => with_types [
+        [ 'body', 'id', 'Int' ],
+    ] => sub { return 'body' };
 }
 
 my $test = Plack::Test->create( MyApp->to_app );
 
-# success
-subtest 'Mandatory arguments' => sub {
-    my $response = $test->request( GET '/30?id=10' );
-    ok( $response->is_success, 'Successful response' );
-    is( $response->content, 'hello', 'Correct output' );
-};
+sub successful_test {
+    my ( $request, $source ) = @_;
+    my $response = $test->request($request);
+    ok( $response->is_success, "$source succeeded" );
+    is( $response->content, $source, "$source matched and run" );
+}
 
-subtest 'Missing mandatory arguments' => sub {
-    my $response = $test->request( GET '/30' );
-    ok( !$response->is_success, 'Error response' );
+sub missing_test {
+    my ( $request, $source, $param ) = @_;
+    my $response = $test->request($request);
+    ok( !$response->is_success, "$source failed with missing parameter" );
     like(
         $response->content,
-        qr{Missing query parameter: id \(positive_int\)},
-        'Correct output'
+        qr{\QMissing $source parameter: $param\E},
+        "Correct error message for $source"
     );
-};
+}
 
-subtest 'Failing mandatory arguments' => sub {
-    my $response = $test->request( GET '/not_an_int?id=10' );
-    ok( !$response->is_success, 'Error response' );
+sub failing_test {
+    my ( $request, $source, $param, $type ) = @_;
+    my $response = $test->request($request);
+    ok( !$response->is_success, "$source failed with bad parameter value" );
     like(
         $response->content,
-        qr{Type check failed for: num},
-        'Correct output'
+        qr{\Q$source parameter $param must be $type\E},
+        "Correct error message for $source"
     );
+}
+
+subtest 'Correctly handled proper arguments' => sub {
+    successful_test( GET('/route/30'),    'route' );
+    successful_test( GET('/query?id=30'), 'query' );
+    successful_test( GET('/query?id=30&id=4'), 'query' );
+    successful_test( POST( '/body', 'Content' => 'id=30' ), 'body' );
+    successful_test( POST( '/body', 'Content' => 'id=30&id=77' ), 'body' );
 };
 
-subtest 'Optional arguments' => sub {
-    my $response = $test->request( GET '/40?id=20&name=hello' );
-    ok( !$response->is_success, 'Error response' );
-    like(
-        $response->content,
-        qr{Type check failed for: name},
-        'Correct output'
-    );
+subtest 'Failing missing arguments' => sub {
+    missing_test( GET('/query'), 'query', 'id' );
+    missing_test( POST('/body'), 'body', 'id' );
 };
 
-subtest 'Multiple source values' => sub {
-    {
-        my $response = $test->request( POST '/upload?filename=foo' );
-        ok( $response->is_success, 'Successful response' );
-        is( $response->content, 'foo', 'Correct output' );
-    }
-
-    {
-        my $response = $test->request( POST '/upload', 'filename=bar' );
-        ok( $response->is_success, 'Successful response' );
-        is( $response->content, 'bar', 'Correct output' );
-    }
+subtest 'Failing incorrect arguments' => sub {
+    failing_test( GET('/route/k'), 'route', 'id', 'Int', );
+    failing_test( GET('/query?id=k'), 'query', 'id', 'Int', );
+    failing_test( POST( '/body', 'Content' => 'id=k' ), 'body', 'id', 'Int' );
 };
