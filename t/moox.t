@@ -25,7 +25,7 @@ my $doc;
         }
     );
 
-    register_type_response(
+    register_type_action(
         'doc' => sub {
             $doc++;
             send_error('Whoohoo error!');

@@ -9,17 +9,32 @@ use Dancer2::Plugin;
 use Scalar::Util ();
 
 ## no critic qw(Subroutines::ProhibitCallsToUndeclaredSubs)
-plugin_keywords(qw<register_type_check register_type_response with_types>);
+plugin_keywords(qw<register_type_check register_type_action with_types>);
 
 has 'type_checks' => (
     'is'      => 'ro',
     'default' => sub { +{} },
 );
 
-has 'type_responses' => (
+has 'type_actions' => (
     'is'      => 'ro',
-    'default' => sub { +{} },
+    'builder' => '_build_type_actions',
 );
+
+sub _build_type_actions {
+    my $self = shift;
+    return {
+        'error' => sub {
+            my $details = shift;
+            my $source  = $details->{'source'};
+            my $type    = $details->{'type'};
+            my $name    = $details->{'name'};
+
+            $self->dsl->send_error( "$source parameter $name must be $type",
+                400 );
+        },
+    };
+}
 
 sub register_type_check {
     my ( $self, $name, $cb ) = @_;
@@ -27,9 +42,9 @@ sub register_type_check {
     return;
 }
 
-sub register_type_response {
+sub register_type_action {
     my ( $self, $name, $cb ) = @_;
-    $self->type_responses->{$name} = $cb;
+    $self->type_actions->{$name} = $cb;
     return;
 }
 
@@ -47,25 +62,45 @@ sub with_types {
         @{$type_details} == 4
             or Carp::croak('Please provide 4 elements for each type');
 
-        my ( $source, $name, $type, $response ) = @{$type_details};
+        my ( $sources, $name, $type, $action ) = @{$type_details};
 
-        $source eq 'route' || $source eq 'query' || $source eq 'body'
-            or
-            Carp::croak("Type $name provided from unknown source '$source'");
+        # default action
+        defined $action && length $action
+            or $action = 'error';
+
+        if ( ref $sources ) {
+            my $src_ref = ref $sources;
+            $src_ref eq 'ARRAY'
+                or Carp::croak("Source cannot be of $src_ref");
+        } else {
+            $sources = [$sources];
+        }
+
+        foreach my $src ( @{$sources} ) {
+            $src eq 'route' || $src eq 'query' || $src eq 'body'
+                or Carp::croak("Type $name provided from unknown source '$src'");
+        }
 
         defined $self->type_checks->{$type}
             or Carp::croak("Type $name provided unknown type '$type'");
 
-        defined $self->type_responses->{$response}
+        defined $self->type_actions->{$action}
             or
-            Carp::croak("Type $name provided unknown response '$response'");
+            Carp::croak("Type $name provided unknown action '$action'");
 
-        $params_to_check{$source}{$name} = [ $is_optional, $type_details ];
+        foreach my $src ( @{$sources} ) {
+            $params_to_check{$src}{$name} = {
+                'optional' => $is_optional,
+                'source'   => $src,
+                'name'     => $name,
+                'type'     => $type,
+                'action'   => $action,
+            };
+        }
     }
 
     # Couldn't prove yet that this is required, but it makes sense to me
     Scalar::Util::weaken( my $plugin = $self );
-    #my $plugin = $self;
 
     return sub {
         my @route_args = @_;
@@ -78,19 +113,12 @@ sub with_types {
         # on how many parameters to added to be checked, which is a known
         # set. (GET has a max limit, PUT/POST...?) -- SX
 
-        foreach my $param_source (qw<route query body>) {
-            # Only check if anything was supplied
-            if ( $params_to_check{$param_source} ) {
-                foreach my $param_name (
-                    keys %{ $params_to_check{$param_source} } )
-                {
-                    my ( $is_optional, $type_details )
-                        = @{ $params_to_check{$param_source}{$param_name} };
-
-                    $plugin->run_check( $is_optional, $type_details );
-                }
+        # Only check if anything was supplied
+        foreach my $source (qw<route query body>) {
+            foreach my $name ( keys %{ $params_to_check{$source} } ) {
+                my $type_details = $params_to_check{$source}{$name};
+                $plugin->run_check($type_details);
             }
-
         }
 
         $cb->(@route_args);
@@ -98,9 +126,10 @@ sub with_types {
 }
 
 sub run_check {
-    my ( $self, $is_optional, $type_details ) = @_;
+    my ( $self, $details ) = @_;
 
-    my ( $source, $name, $type, $action ) = @{$type_details};
+    my ( $source, $name, $type, $action, $optional )
+        = @{$details}{qw<source name type action optional>};
 
     my $app     = $self->app;
     my $request = $app->request;
@@ -113,16 +142,16 @@ sub run_check {
     # No parameter value, is this okay or not?
     if ( !exists $params->{$name} ) {
         # It's okay, ignore
-        $is_optional
+        $optional
             and return 1;
 
         # Not okay, missing when it's required!
         $self->dsl->send_error(
-            "Missing $source parameter $name ($type)",
-            500,
+            "Missing $source parameter: $name ($type)",
+            400,
         );
 
-        return $self->type_responses->{'error'}->( $app, $type_details );
+        return $self->type_actions->{'error'}->($details);
     }
 
     my @param_values = $params->get_all($name);
@@ -130,10 +159,10 @@ sub run_check {
 
     foreach my $param_value (@param_values) {
         if ( ! $check_cb->($param_value) ) {
-            my $response_cb
-                = $self->type_responses->{$action};
+            my $action_cb
+                = $self->type_actions->{$action};
 
-            return $response_cb->( $app, $type_details );
+            return $action_cb->($details);
         }
     }
 
@@ -150,15 +179,12 @@ __END__
     use Dancer2;
     use Dancer2::Plugin::ParamTypes;
 
-    # First we define some type checks and type responses
+    # First we define some type checks and type actions
     # Read below for these two methods, they are required
     register_type_check(...);
-    register_type_response(...);
-
-    # Now we can provide types
-    get '/:num' => with_types [
+cq
         [ 'query', 'id',  'positive_int', 'error' ],
-        [ 'route', 'num', 'positive_int', 'error' ],
+        [ 'route', 'num', 'positive_int', 'warn' ],
 
         'optional' => [ 'query', 'name', 'int', 'error' ],
     ] => sub {
@@ -188,11 +214,14 @@ First you must register a type check, allowing you to test stuff:
         return Scalar::Util::looks_like_number( $_[0] );
     };
 
-=head3 C<register_type_response>
+=head3 C<register_type_action>
 
-    register_type_response 'error' => sub {
-        my ( $app, $type_details ) = @_;
-        my ( $source, $name, $type, $action ) = @{$type_details};
+    register_type_action 'error' => sub {
+        my $details = shift;
+        my $source  = $details->{'source'};
+        my $type    = $details->{'type'};
+        my $name    = $details->{'name'};
+        my $action  = $details->{'action'};
 
         send_error("Type check failed for $source $name ($type)");
     }
