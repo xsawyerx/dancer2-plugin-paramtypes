@@ -4,7 +4,6 @@ package Dancer2::Plugin::ParamTypes;
 use strict;
 use warnings;
 
-use DDP;
 use Carp ();
 use Dancer2::Plugin;
 use Scalar::Util ();
