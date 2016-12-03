@@ -59,10 +59,10 @@ sub with_types {
             : $item eq 'optional'  ? ( 1, $full_type_details->[ ++$idx ] )
             : Carp::croak("Unsupported type option: $item");
 
-        @{$type_details} == 4
-            or Carp::croak('Please provide 4 elements for each type');
-
         my ( $sources, $name, $type, $action ) = @{$type_details};
+
+        @{$type_details} == 4 || @{$type_details} == 3
+            or Carp::croak("Incorrect number of elements for type ($name)");
 
         # default action
         defined $action && length $action
