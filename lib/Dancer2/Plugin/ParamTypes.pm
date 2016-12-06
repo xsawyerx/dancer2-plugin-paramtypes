@@ -23,6 +23,7 @@ has 'type_actions' => (
 
 sub _build_type_actions {
     my $self = shift;
+    Scalar::Util::weaken( my $plugin = $self );
     return {
         'error' => sub {
             my $details = shift;
@@ -30,7 +31,7 @@ sub _build_type_actions {
             my $type    = $details->{'type'};
             my $name    = $details->{'name'};
 
-            $self->dsl->send_error( "$source parameter $name must be $type",
+            $plugin->dsl->send_error( "$source parameter $name must be $type",
                 400 );
         },
     };
