@@ -201,30 +201,44 @@ __END__
     use Dancer2;
     use Dancer2::Plugin::ParamTypes;
 
-    # First we define some type checks and type actions
-    # Read below for these two methods, they are required
-    register_type_check(...);
-cq
-        [ 'query', 'id',  'positive_int', 'error' ],
-        [ 'route', 'num', 'positive_int', 'warn' ],
+    # First we define some type checks
+    # Read below for explanation
+    register_type_check 'Int' => sub {...};
+    register_type_check 'Str' => sub {...};
 
-        'optional' => [ 'query', 'name', 'int', 'error' ],
+    get '/:id' => with_types [
+        # Required
+        [ 'route', 'id',  'Int' ],
+        [ 'query', 'num', 'Int' ],
+
+        # Optional, either as query or body
+        'optional' => [ [ 'query', 'body' ], 'name', 'Str' ],
     ] => sub {
-        my $id = query_parameters->{'id'};
+        my $id  = route_parameters->{'id'};
+        my @num = query_parameters->get_all('num');
+        ...
+    };
+
+    # If we define our own action
+    register_type_action 'SpecialError' => sub {...};
+
+    # We can now use it in the type check
+    get '/' => with_types [
+        [ 'query', 'id', 'Int', 'SpecialError' ]
+    ] => sub {
         ...
     };
 
 =head1 DESCRIPTION
 
-This is a basic module that allows you to provide a stanza of parameter
+This is a simple module that allows you to provide a stanza of parameter
 type checks for your routes.
 
-It supports all three possible sources (C<route>, C<query>, and
-C<body>).
+It supports all three possible sources: C<route>, C<query>, and
+C<body>.
 
-Currently it does not have any known types and actions on its own. You
-you will need to write your own code to add them. The synopsis includes
-an example on adding your own.
+Currently no types are available in the system, so you will need to
+write your own code to add them. See the following methods below.
 
 =head2 Methods
 
@@ -238,14 +252,14 @@ First you must register a type check, allowing you to test stuff:
 
 =head3 C<register_type_action>
 
-    register_type_action 'error' => sub {
+    register_type_action 'MyError' => sub {
         my $details = shift;
         my $source  = $details->{'source'};
-        my $type    = $details->{'type'};
         my $name    = $details->{'name'};
+        my $type    = $details->{'type'};
         my $action  = $details->{'action'};
 
-        send_error("Type check failed for $source $name ($type)");
+        send_error("Type check failed for $name ($type)");
     }
 
 =head3 C<with_types>
@@ -253,10 +267,26 @@ First you must register a type check, allowing you to test stuff:
 C<with_types> defines checks for parameters for a route request.
 
     get '/:name' => with_request [
-        [ 'route', 'name', 'Str', 'error' ]
+
+        # Basic usage
+        [ SOURCE, NAME, TYPE ]
+
+        # Provide a custom action
+        [ SOURCE, NAME, TYPE, ACTION ]
+
+        # Provide multiple sources (either one will work)
+        [ [ SOURCE1, SOURCE2 ], NAME, TYPE ],
+
+        # Optional type check
+        # (if available will be checked, otherwise ignored)
+        'optional' => [ SOURCE, NAME, TYPE ]
+
     ] => sub {
         ...
     };
+
+Above are all the options, but they will also work in any other
+combination.
 
 =head2 Connecting existing type systems
 
