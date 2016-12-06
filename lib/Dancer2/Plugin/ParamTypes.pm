@@ -72,6 +72,9 @@ sub with_types {
             my $src_ref = ref $sources;
             $src_ref eq 'ARRAY'
                 or Carp::croak("Source cannot be of $src_ref");
+
+            @{$sources} > 0
+                or Carp::croak('You must provide at least one source');
         } else {
             $sources = [$sources];
         }
@@ -88,15 +91,14 @@ sub with_types {
             or
             Carp::croak("Type $name provided unknown action '$action'");
 
-        foreach my $src ( @{$sources} ) {
-            $params_to_check{$src}{$name} = {
-                'optional' => $is_optional,
-                'source'   => $src,
-                'name'     => $name,
-                'type'     => $type,
-                'action'   => $action,
-            };
-        }
+        my $src = join ':', sort @{$sources};
+        $params_to_check{$src}{$name} = {
+            'optional' => $is_optional,
+            'source'   => $src,
+            'name'     => $name,
+            'type'     => $type,
+            'action'   => $action,
+        };
     }
 
     # Couldn't prove yet that this is required, but it makes sense to me
@@ -114,10 +116,27 @@ sub with_types {
         # set. (GET has a max limit, PUT/POST...?) -- SX
 
         # Only check if anything was supplied
-        foreach my $source (qw<route query body>) {
+        foreach my $source ( keys %params_to_check ) {
             foreach my $name ( keys %{ $params_to_check{$source} } ) {
-                my $type_details = $params_to_check{$source}{$name};
-                $plugin->run_check($type_details);
+                my @sources = split /:/, $source;
+                my $details = $params_to_check{$source}{$name};
+
+                if ( @sources == 1 ) {
+                    $plugin->run_check($details)
+                        or $self->missing_param_response($details);
+                } else {
+                    my $found;
+                    foreach my $single_source (@sources) {
+                        $details->{'source'} = $single_source;
+                        if ( $plugin->run_check($details) ) {
+                            $found++;
+                            last;
+                        }
+                    }
+
+                    $found
+                        or $self->missing_param_response($details);
+                }
             }
         }
 
@@ -146,12 +165,7 @@ sub run_check {
             and return 1;
 
         # Not okay, missing when it's required!
-        $self->dsl->send_error(
-            "Missing $source parameter: $name ($type)",
-            400,
-        );
-
-        return $self->type_actions->{'error'}->($details);
+        return;
     }
 
     my @param_values = $params->get_all($name);
@@ -166,7 +180,18 @@ sub run_check {
         }
     }
 
-    return;
+    return 1;
+}
+
+sub missing_param_response {
+    my ( $self, $details ) = @_;
+    my ( $name, $type ) = @{$details}{qw<name type>};
+
+    # Not okay, missing when it's required!
+    $self->dsl->send_error(
+        "Missing parameter: $name ($type)",
+        400,
+    );
 }
 
 1;

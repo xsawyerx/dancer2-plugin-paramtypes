@@ -14,7 +14,7 @@ sub missing_test {
     ok( !$response->is_success, "$source failed with missing parameter" );
     like(
         $response->content,
-        qr{\QMissing $source parameter: $param\E},
+        qr{\QMissing parameter: $param\E},
         "Correct error message for $source"
     );
 }
