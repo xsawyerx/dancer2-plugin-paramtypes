@@ -27,12 +27,8 @@ sub _build_type_actions {
     return {
         'error' => sub {
             my $details = shift;
-            my $source  = $details->{'source'};
-            my $type    = $details->{'type'};
-            my $name    = $details->{'name'};
-
-            $plugin->dsl->send_error( "$source parameter $name must be $type",
-                400 );
+            my ( $type, $name ) = @{$details}{qw<type name>};
+            $plugin->dsl->send_error( "Parameter $name must be $type", 400 );
         },
     };
 }

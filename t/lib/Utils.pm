@@ -25,7 +25,7 @@ sub failing_test {
     ok( !$response->is_success, "$source failed with bad parameter value" );
     like(
         $response->content,
-        qr{\Q$source parameter $param must be $type\E},
+        qr{\QParameter $param must be $type\E},
         "Correct error message for $source"
     );
 }
