@@ -12,7 +12,10 @@ package MyApp {
     use Dancer2;
     use Dancer2::Plugin::ParamTypes;
 
-    get '/' => with_types [ [ 'query', 'id', 'positive_int', 'error' ], ] =>
+    register_type_check(
+        'Int' => sub { Scalar::Util::looks_like_number( $_[0] ) } );
+
+    get '/' => with_types [ [ 'query', 'id', 'Int' ] ] =>
         sub {1};
 }
 
@@ -22,4 +25,3 @@ my $runner = Dancer2->runner;
 memory_cycle_ok( $runner, 'Runner has no memory cycles' );
 memory_cycle_ok( $runner->apps->[0], 'App has no memory cycles' );
 memory_cycle_ok( $app, 'App code has no memory cycles' );
-
