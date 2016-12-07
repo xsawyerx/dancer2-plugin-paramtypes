@@ -49,6 +49,9 @@ sub with_types {
     my ( $self, $full_type_details, $cb ) = @_;
     my %params_to_check;
 
+    ref $full_type_details eq 'ARRAY'
+        or Carp::croak('Input for with_types must be arrayref');
+
     for ( my $idx = 0; $idx <= $#{$full_type_details}; $idx++ ) {
         my $item = $full_type_details->[$idx];
         my ( $is_optional, $type_details )
