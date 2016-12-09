@@ -308,3 +308,44 @@ type systems:
 
         return 1;
     };
+
+=head2 Creating your own pre-defined type checks
+
+The following is a simple example of introducing a subclass of this
+plugin in order to create your own version with pre-defined checks.
+
+    package Dancer2::Plugin::MyParamTypes;
+    use strict;
+    use warnings;
+    use Dancer2::Plugin;
+
+    # subclass
+    extends('Dancer2::Plugin::ParamTypes');
+
+    # define our own plugin keyword
+    plugin_keywords('with_types');
+
+    # which simply calls the parent
+    sub with_types {
+        my $self = shift;
+        return $self->SUPER::with_types(@_);
+    }
+
+    sub BUILD {
+        my $self = shift;
+
+        # register our own type checks
+        $self->register_type_check(
+            'Int' => sub { Scalar::Util::looks_like_number( $_[0] ) },
+        );
+    }
+
+Later, the application can simply use this module:
+
+    package MyApp;
+    use Dancer2;
+    use Dancer2::Plugin::MyParamTypes;
+
+    get '/' => with_types [
+        [ 'query', 'id', 'Int' ],
+    ] => sub {...};
