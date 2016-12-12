@@ -261,11 +261,12 @@ First you must register a type check, allowing you to test stuff:
 =head3 C<register_type_action>
 
     register_type_action 'MyError' => sub {
-        my $details = shift;
-        my $source  = $details->{'source'};
-        my $name    = $details->{'name'};
-        my $type    = $details->{'type'};
-        my $action  = $details->{'action'};
+        my ( $self, $details ) = @_;
+
+        my $source = $details->{'source'};
+        my $name   = $details->{'name'};
+        my $type   = $details->{'type'};
+        my $action = $details->{'action'};
 
         send_error("Type check failed for $name ($type)");
     }
