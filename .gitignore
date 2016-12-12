@@ -19,3 +19,4 @@ nytprof.out
 *.bs
 /_eumm/
 *.sw?
+Dancer2-Plugin-ParamTypes-[0-9]*
