@@ -26,9 +26,20 @@ sub _build_type_actions {
     Scalar::Util::weaken( my $plugin = $self );
     return {
         'error' => sub {
-            my $details = shift;
-            my ( $type, $name ) = @{$details}{qw<type name>};
+            my ( $self, $details ) = @_;
+            my ( $type, $name )    = @{$details}{qw<type name>};
+
             $plugin->dsl->send_error( "Parameter $name must be $type", 400 );
+        },
+
+        'missing' => sub {
+            my ( $self, $details ) = @_;
+            my ( $name, $type )    = @{$details}{qw<name type>};
+
+            $self->dsl->send_error(
+                "Missing parameter: $name ($type)",
+                400,
+            );
         },
     };
 }
@@ -91,6 +102,9 @@ sub with_types {
             or
             Carp::croak("Type $name provided unknown action '$action'");
 
+        defined $self->type_actions->{'missing'}
+            or Carp::croak('You need to provide a "missing" action');
+
         my $src = join ':', sort @{$sources};
         $params_to_check{$src}{$name} = {
             'optional' => $is_optional,
@@ -123,7 +137,8 @@ sub with_types {
 
                 if ( @sources == 1 ) {
                     $plugin->run_check($details)
-                        or $self->missing_param_response($details);
+                        or
+                        $self->type_actions->{'missing'}->( $self, $details );
                 } else {
                     my $found;
                     foreach my $single_source (@sources) {
@@ -135,7 +150,8 @@ sub with_types {
                     }
 
                     $found
-                        or $self->missing_param_response($details);
+                        or
+                        $self->type_actions->{'missing'}->( $self, $details );
                 }
             }
         }
@@ -176,22 +192,11 @@ sub run_check {
             my $action_cb
                 = $self->type_actions->{$action};
 
-            return $action_cb->($details);
+            return $action_cb->( $self, $details );
         }
     }
 
     return 1;
-}
-
-sub missing_param_response {
-    my ( $self, $details ) = @_;
-    my ( $name, $type ) = @{$details}{qw<name type>};
-
-    # Not okay, missing when it's required!
-    $self->dsl->send_error(
-        "Missing parameter: $name ($type)",
-        400,
-    );
 }
 
 1;
