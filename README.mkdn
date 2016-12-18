@@ -4,7 +4,7 @@ Dancer2::Plugin::ParamTypes - Parameter type checking plugin for Dancer2
 
 # VERSION
 
-version 0.001
+version 0.002
 
 # SYNOPSIS
 
