@@ -1,12 +1,15 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Test::More 'tests' => 1;
+use Test::More;
 use t::lib::Utils;
 use Plack::Test;
 use HTTP::Request::Common;
 
-## no critic qw(Subroutines::ProhibitCallsToUndeclaredSubs)
+eval { require MooX::Types::MooseLike::Base; 1; }
+or plan 'skip_all' => 'You need MooX::Types::MooseLike::Base for this test';
+
+plan 'tests' => 1;
 
 {
     package MyApp;
@@ -21,7 +24,7 @@ use HTTP::Request::Common;
                 or return;
 
             return 1;
-        }
+        },
     );
 
     get '/' => with_types [
