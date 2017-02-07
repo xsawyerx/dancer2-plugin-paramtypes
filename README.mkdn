@@ -4,7 +4,7 @@ Dancer2::Plugin::ParamTypes - Parameter type checking plugin for Dancer2
 
 # VERSION
 
-version 0.002
+version 0.003
 
 # SYNOPSIS
 
@@ -78,7 +78,7 @@ First you must register a type check, allowing you to test stuff:
 
 `with_types` defines checks for parameters for a route request.
 
-    get '/:name' => with_request [
+    get '/:name' => with_types [
 
         # Basic usage
         [ SOURCE, NAME, TYPE ]
@@ -165,7 +165,7 @@ Sawyer X
 
 # COPYRIGHT AND LICENSE
 
-This software is Copyright (c) 2016 by Sawyer X.
+This software is Copyright (c) 2017 by Sawyer X.
 
 This is free software, licensed under:
 
