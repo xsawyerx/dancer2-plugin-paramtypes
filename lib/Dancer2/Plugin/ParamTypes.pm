@@ -275,7 +275,7 @@ First you must register a type check, allowing you to test stuff:
 
 C<with_types> defines checks for parameters for a route request.
 
-    get '/:name' => with_request [
+    get '/:name' => with_types [
 
         # Basic usage
         [ SOURCE, NAME, TYPE ]
