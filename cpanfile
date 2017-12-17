@@ -1,4 +1,5 @@
 requires 'Dancer2';
+requires 'Ref::Util';
 
 on 'test' => sub {
     requires 'Test::More';
