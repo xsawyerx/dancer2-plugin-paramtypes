@@ -115,13 +115,14 @@ sub with_types {
             or Carp::croak('You need to provide a "missing" action');
 
         my $src = join ':', sort @{$sources};
-        $params_to_check{$src}{$name} = {
+        push @{ $params_to_check{$src} },
+          {
             'optional' => $is_optional,
             'source'   => $src,
             'name'     => $name,
             'type'     => $type,
             'action'   => $action,
-        };
+          };
     }
 
     # Couldn't prove yet that this is required, but it makes sense to me
@@ -140,10 +141,8 @@ sub with_types {
 
         # Only check if anything was supplied
         foreach my $source ( keys %params_to_check ) {
-            foreach my $name ( keys %{ $params_to_check{$source} } ) {
-                my @sources = split /:/xms, $source;
-                my $details = $params_to_check{$source}{$name};
-
+            my @sources = split /:/xms, $source;
+            foreach my $details ( @{ $params_to_check{$source} } ) {
                 if ( @sources == 1 ) {
                     $plugin->run_check($details)
                         or
